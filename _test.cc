@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <string>
+#include <time.h>
 
 #include "rocksdb/db.h"
 #include "rocksdb/slice.h"
@@ -20,72 +21,95 @@ std::string kDBPath = "C:\\Windows\\TEMP\\rocksdb_project";
 std::string kDBPath = "/tmp/rocksdb_project";
 #endif
 
+// To access members of a structure, use the dot operator
+// To access members of a structure through a pointer, use the arrow operator
 int main() {
 	// initialize the database and the options
 	DB* db;
 	Options options;
+	// initialize the timing variables
+	clock_t startTime = clock();
+	clock_t endTime = clock();
 	// Optimize RocksDB. This is the easiest way to get RocksDB to perform well
 	options.IncreaseParallelism();
 	options.OptimizeLevelStyleCompaction();
-	// create the DB if it's not already present
-	options.create_if_missing = true;
+	options.create_if_missing = true;  // create the DB if it's not already present
+	options.error_if_exists = true;  // raise an error if the DB already exists
 	// open DB and check the status
 	Status statusDB = DB::Open(options, kDBPath, &db);
-	assert(statusDB.ok());
-	// Put key-value
-	statusDB = db->Put(WriteOptions(), "key1", "value");
 	assert(statusDB.ok());  // make sure to check error
-	// retrieve the value inserted
-	std::string value;
-	statusDB = db->Get(ReadOptions(), "key1", &value);
-	assert(statusDB.ok());  // make sure to check error
-	assert(value == "value");  // check that we retrieved the value
-	// atomically apply a set of updates
-	{
-		WriteBatch batch;
-		batch.Delete("key1");
-		batch.Put("key2", value);
-		statusDB = db->Write(WriteOptions(), &batch);
+
+	// TEST: insert a range of distinct values =======================================
+	startTime = clock();  // start time of this operation
+	std::string dataKey;
+	std::string dataValue;
+	for (int i = 1; i <= 10; i++) {
+		// insert a series of integers as keys and their tenfold values as values
+		dataKey = std::to_string(i);
+		dataValue = std::to_string(i * 10);
+		statusDB = db->Put(WriteOptions(), dataKey, dataValue);
+		assert(statusDB.ok());  // make sure to check error
 	}
-	statusDB = db->Get(ReadOptions(), "key1", &value);
-	assert(statusDB.IsNotFound());
-	db->Get(ReadOptions(), "key2", &value);
-	assert(value == "value");
+	endTime = clock();  // end time of this operation
+	printf("Insert time: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
+	// ===============================================================================
+
+	// non-empty point and range look-ups ============================================
+	std::string valueRead;  // retrieve the value inserted, check what "1" corresponds to
+	statusDB = db->Get(ReadOptions(), "1", &valueRead);
+	assert(statusDB.ok());  // make sure to check error
+	assert(valueRead == "10");  // check that we retrieved the value
+	// range scan
+	rocksdb::Iterator* iter = db->NewIterator(rocksdb::ReadOptions());
+	// traverse all data
+	for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
+		cout << "FULL" << iter->key().ToString() << ": " << iter->value().ToString() << endl;
+	}
+	assert(iter->status().ok()); // Check for any errors found during the scan
+	// traverse a range
+	std::string rangeReadStart;
+	std::string rangeReadEnd;
+	for (iter->Seek(rangeReadStart); iter->Valid() && iter->key().ToString() < rangeReadEnd; iter->Next()) {
+		cout << "RANGE [" << rangeReadStart << ", " << rangeReadEnd << "] " << iter->key().ToString() << ": " 
+			 << iter->value().ToString() << endl;
+	}
+	assert(iter->status().ok()); // Check for any errors found during the scan
+	delete iter;
+	// ===============================================================================
+
+	// batched operations, test single delete ========================================
+	std::string valueDel;
+	{  // batch is used for ensuring atomicity
+		WriteBatch batch;  // initialize the batch
+		batch.Delete("1");  // add new operation(s) to the batch
+		// ensure that SingleDelete only applies to a key having not been deleted using Delete()
+		batch.SingleDelete("2");
+		statusDB = db->Write(WriteOptions(), &batch);  // apply the batched operations to the DB
+	}
+	statusDB = db->Get(ReadOptions(), "1", &valueDel);
+	assert(statusDB.IsNotFound());  // check that the value has been deleted
+	// ===============================================================================
+
+	// test read pinnacle slice ===========================================================
 	{
 		PinnableSlice pinnable_val;
-		db->Get(ReadOptions(), db->DefaultColumnFamily(), "key2", &pinnable_val);
-		assert(pinnable_val == "value");
+		db->Get(ReadOptions(), db->DefaultColumnFamily(), "3", &pinnable_val);
+		assert(pinnable_val == "30");
 	}
-	// test range deletes #####################################################
-	Slice start, end; // set start (inclusive) and end (exclusive) of the range
-	// use iterator to delete 
-	auto iter = db->NewIterator(ReadOptions());
-	for (iter->Seek(start); cmp->Compare(iter->key(), end) < 0; iter->Next()) {
-		db->Delete(WriteOptions(), iter->key());
-	}
+	// ===============================================================================
+
+	// comparing the performance of many small range deletes & a few long range deletes
+	// test range deletes ============================================================
+	Slice startDelete; // set start (inclusive) and end (exclusive) of the range
+	Slice endDelete;
+	startTime = clock();
 	// native range delete, creating a range tombstone
-	db->DeleteRange(WriteOptions(), start, end);
-	// test range deletes #####################################################
-	{
-		std::string string_val;
-		// If it cannot pin the value, it copies the value to its internal buffer.
-		// The internal buffer could be set during construction.
-		PinnableSlice pinnable_val(&string_val);
-		db->Get(ReadOptions(), db->DefaultColumnFamily(), "key2", &pinnable_val);
-		assert(pinnable_val == "value");
-		// If the value is not pinned, the internal buffer must have the value.
-		assert(pinnable_val.IsPinned() || string_val == "value");
-	}
-	PinnableSlice pinnable_val;
-	statusDB = db->Get(ReadOptions(), db->DefaultColumnFamily(), "key1", &pinnable_val);
-	assert(statusDB.IsNotFound());
-	// Reset PinnableSlice after each use and before each reuse
-	pinnable_val.Reset();
-	db->Get(ReadOptions(), db->DefaultColumnFamily(), "key2", &pinnable_val);
-	assert(pinnable_val == "value");
-	pinnable_val.Reset();
-	// The Slice pointed by pinnable_val is not valid after this point
-	// delete the database
+	db->DeleteRange(WriteOptions(), startDelete, endDelete);
+	endTime = clock();
+	printf("Range delete time: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
+	// ===============================================================================
+
+	// delete the database and end the test
 	delete db;
 	return 0;
 }
