@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <string>
 #include <time.h>
+#include <iostream>
 
 #include "rocksdb/db.h"
 #include "rocksdb/slice.h"
@@ -13,6 +14,7 @@ using ROCKSDB_NAMESPACE::ReadOptions;
 using ROCKSDB_NAMESPACE::Status;
 using ROCKSDB_NAMESPACE::WriteBatch;
 using ROCKSDB_NAMESPACE::WriteOptions;
+using ROCKSDB_NAMESPACE::Slice;
 
 // define the path of the project
 #if defined(OS_WIN)
@@ -39,11 +41,12 @@ int main() {
 	Status statusDB = DB::Open(options, kDBPath, &db);
 	assert(statusDB.ok());  // make sure to check error
 
+	// find what kind of metric can measure the effects of range delete, e.g., measuring tombstone size
 	// TEST: insert a range of distinct values =======================================
 	startTime = clock();  // start time of this operation
 	std::string dataKey;
 	std::string dataValue;
-	for (int i = 1; i <= 10; i++) {
+	for (int i = 1; i <= 10; i++) {  // test at least 1GB of data
 		// insert a series of integers as keys and their tenfold values as values
 		dataKey = std::to_string(i);
 		dataValue = std::to_string(i * 10);
@@ -63,15 +66,15 @@ int main() {
 	rocksdb::Iterator* iter = db->NewIterator(rocksdb::ReadOptions());
 	// traverse all data
 	for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
-		cout << "FULL" << iter->key().ToString() << ": " << iter->value().ToString() << endl;
+		std::cout << "FULL" << iter->key().ToString() << ": " << iter->value().ToString() << std::endl;
 	}
 	assert(iter->status().ok()); // Check for any errors found during the scan
 	// traverse a range
 	std::string rangeReadStart;
 	std::string rangeReadEnd;
 	for (iter->Seek(rangeReadStart); iter->Valid() && iter->key().ToString() < rangeReadEnd; iter->Next()) {
-		cout << "RANGE [" << rangeReadStart << ", " << rangeReadEnd << "] " << iter->key().ToString() << ": " 
-			 << iter->value().ToString() << endl;
+		std::cout << "RANGE [" << rangeReadStart << ", " << rangeReadEnd << "] " << iter->key().ToString() << ": " 
+			 << iter->value().ToString() << std::endl;
 	}
 	assert(iter->status().ok()); // Check for any errors found during the scan
 	delete iter;
@@ -90,7 +93,7 @@ int main() {
 	assert(statusDB.IsNotFound());  // check that the value has been deleted
 	// ===============================================================================
 
-	// test read pinnacle slice ===========================================================
+	// test read pinnacle slice ======================================================
 	{
 		PinnableSlice pinnable_val;
 		db->Get(ReadOptions(), db->DefaultColumnFamily(), "3", &pinnable_val);
@@ -104,8 +107,9 @@ int main() {
 	Slice endDelete;
 	startTime = clock();
 	// native range delete, creating a range tombstone
-	db->DeleteRange(WriteOptions(), startDelete, endDelete);
+	statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), startDelete, endDelete);
 	endTime = clock();
+	assert(statusDB.ok());  // make sure to check error
 	printf("Range delete time: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
 	// ===============================================================================
 
