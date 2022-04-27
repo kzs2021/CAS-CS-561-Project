@@ -128,23 +128,35 @@ int main() {
 	delete iterBefore;  // delete the iterator
 
 	// TEST: delete some ranges
-	Slice startDelete;
-	Slice endDelete;
-	int rangeDelSize = rangeSize/100;  // number of elements in each range delete
-	int numRangeDel = 10;  // number of range deletes
-	int startTemp = rangeSize/100;
-	startTime = clock();  // start time of this operation
-	// ranges to be deleted: 
-	for (int i = 0; i < numRangeDel; i++) {
-		startDelete = fixDigit(lenRangeSize, std::to_string(startTemp)); // set start (inclusive) and end (exclusive) of the range
-		endDelete = fixDigit(lenRangeSize, std::to_string(startTemp + rangeDelSize));
-		// native range delete, creating a range tombstone
-		statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), startDelete, endDelete);
-		std::cout << "RANGE DELETED [" << startDelete.ToString() << ", " << endDelete.ToString() << "] " << std::endl;
-		startTemp += rangeSize/10;
+	bool smallRange = true;
+	// delete many small ranges
+	if (smallRange) {
+		Slice startDelete;
+		Slice endDelete;
+		int rangeDelSize = rangeSize/100;  // number of elements in each range delete
+		int numRangeDel = 10;  // number of range deletes
+		int startTemp = rangeSize/100;
+		startTime = clock();  // start time of this operation
+		// ranges to be deleted: 
+		for (int i = 0; i < numRangeDel; i++) {
+			startDelete = fixDigit(lenRangeSize, std::to_string(startTemp)); // set start (inclusive) and end (exclusive) of the range
+			endDelete = fixDigit(lenRangeSize, std::to_string(startTemp + rangeDelSize));
+			// native range delete, creating a range tombstone
+			statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), startDelete, endDelete);
+			std::cout << "RANGE DELETED [" << startDelete.ToString() << ", " << endDelete.ToString() << "] " << std::endl;
+			startTemp += rangeSize/10;
+		}
+		endTime = clock();  // end time of this operation
+		printf("Small range deletion time: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
 	}
-	endTime = clock();  // end time of this operation
-	printf("Range deletion time: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
+	else {  // delete a few large ranges
+		startTime = clock();  // start time of this operation
+		statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), "0100000", "0350000");
+		statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), "0400000", "0650000");
+		statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), "0700000", "0950000");
+		endTime = clock();  // end time of this operation
+		printf("Large range deletion time: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
+	}
 
 	// TEST: point query after deletion
 	std::set<std::string> keyReadSetAfter;  // ensure that we do not repeatedly visit a key
