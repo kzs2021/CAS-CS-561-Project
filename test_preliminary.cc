@@ -129,7 +129,6 @@ int main() {
 
 	// TEST: delete some ranges
 	bool smallRange = true;
-	bool isPointQueryAfter = false;
 	// delete many small ranges
 	if (smallRange) {
 		Slice startDelete;
@@ -164,42 +163,40 @@ int main() {
 		printf("Large range deletion time: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
 	}
 	
-	if (isPointQueryAfter) {
-		// TEST: point query after deletion
-		std::set<std::string> keyReadSetAfter;  // ensure that we do not repeatedly visit a key
-		int countPointAfter = 0;
-		startTime = clock();  // start time of this operation
-		// perform some random point queries
-		for (int i = 0; i < numPointQueries; i++) {
+	// TEST: point query after deletion
+	std::set<std::string> keyReadSetAfter;  // ensure that we do not repeatedly visit a key
+	int countPointAfter = 0;
+	startTime = clock();  // start time of this operation
+	// perform some random point queries
+	for (int i = 0; i < numPointQueries; i++) {
+		keyRead = fixDigit(lenRangeSize, std::to_string(rand() % rangeSize));
+		while (keyReadSetAfter.count(keyRead) != 0) {
 			keyRead = fixDigit(lenRangeSize, std::to_string(rand() % rangeSize));
-			while (keyReadSetAfter.count(keyRead) != 0) {
-				keyRead = fixDigit(lenRangeSize, std::to_string(rand() % rangeSize));
-			}
-			statusDB = db->Get(ReadOptions(), keyRead, &valueRead);
-			if (!statusDB.IsNotFound()) {countPointAfter++;}
-			keyReadSetAfter.insert(keyRead);
 		}
-		endTime = clock();  // end time of this operation
-		std::cout << "Point read after deletes count: " << countPointAfter << std::endl;
-		printf("Point queries time after deletes: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
-		//assert(statusDB.ok());  // make sure to check error, why is it sometimes not OK?
+		statusDB = db->Get(ReadOptions(), keyRead, &valueRead);
+		if (!statusDB.IsNotFound()) {countPointAfter++;}
+		keyReadSetAfter.insert(keyRead);
 	}
-	else {
-		// TEST: range read after deletes
-		rocksdb::Iterator* iterAfter = db->NewIterator(rocksdb::ReadOptions());  // the iterator to traverse the data
-		int countRangeReadAfter = 0;
-		startTime = clock();  // start time of this operation
-		for (iterAfter->Seek(rangeReadStart); iterAfter->Valid() && iterAfter->key().ToString() < rangeReadEnd; iterAfter->Next()) {
-			//std::cout << "RANGE [" << rangeReadStart << ", " << rangeReadEnd << "] " << iterAfter->key().ToString() << ": " 
-			//	 	  << iterAfter->value().ToString() << std::endl;
-			countRangeReadAfter++;
-		}
-		endTime = clock();  // end time of this operation
-		std::cout << "Range read after deletes count: " << countRangeReadAfter << std::endl;
-		printf("Range read after deletes time: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
-		assert(iterAfter->status().ok()); // Check for any errors found during the scan
-		delete iterAfter;  // delete the iterator
+	endTime = clock();  // end time of this operation
+	std::cout << "Point read after deletes count: " << countPointAfter << std::endl;
+	printf("Point queries time after deletes: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
+	//assert(statusDB.ok());  // make sure to check error, why is it sometimes not OK?
+	
+	// TEST: range read after deletes
+	rocksdb::Iterator* iterAfter = db->NewIterator(rocksdb::ReadOptions());  // the iterator to traverse the data
+	int countRangeReadAfter = 0;
+	startTime = clock();  // start time of this operation
+	for (iterAfter->Seek(rangeReadStart); iterAfter->Valid() && iterAfter->key().ToString() < rangeReadEnd; iterAfter->Next()) {
+		//std::cout << "RANGE [" << rangeReadStart << ", " << rangeReadEnd << "] " << iterAfter->key().ToString() << ": " 
+		//	 	  << iterAfter->value().ToString() << std::endl;
+		countRangeReadAfter++;
 	}
+	endTime = clock();  // end time of this operation
+	std::cout << "Range read after deletes count: " << countRangeReadAfter << std::endl;
+	printf("Range read after deletes time: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
+	assert(iterAfter->status().ok()); // Check for any errors found during the scan
+	delete iterAfter;  // delete the iterator
+	
 	// delete the database and end the test
 	delete db;
 	return 0;
