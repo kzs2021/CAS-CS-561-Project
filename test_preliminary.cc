@@ -63,7 +63,7 @@ int main() {
 	options.IncreaseParallelism();
 	options.OptimizeLevelStyleCompaction();
 	options.create_if_missing = true;  // create the DB if it's not already present
-	options.error_if_exists = true;  // raise an error if the DB already exists
+	//options.error_if_exists = true;  // raise an error if the DB already exists
 	// open DB and check the status
 	Status statusDB = DB::Open(options, kDBPath, &db);
 	assert(statusDB.ok());  // make sure to check error
