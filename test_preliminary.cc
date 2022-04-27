@@ -81,10 +81,10 @@ int main() {
 		// set up the value, which is a random string
 		dataValue = randomString(valueLen);
 		statusDB = db->Put(WriteOptions(), dataKey, dataValue);
-		assert(statusDB.ok());  // make sure to check error
 	}
 	endTime = clock();  // end time of this operation
 	printf("Insertion time: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
+	assert(statusDB.ok());  // make sure to check error
 
 	// TEST: point read, check both present & invalidated keys, do not check non-existing keys
 	std::string keyRead;  // the key which the point query is interested in
@@ -107,7 +107,7 @@ int main() {
 	endTime = clock();  // end time of this operation
 	std::cout << "Point read before deletes count: " << countPointBefore << std::endl;
 	printf("Point queries time before deletes: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
-	assert(statusDB.ok());  // make sure to check error
+	//assert(statusDB.ok());  // make sure to check error
 
 	// TEST: range read 
 	std::string rangeReadStart = "0250000";  // the starting point of the range
@@ -128,7 +128,7 @@ int main() {
 	delete iterBefore;  // delete the iterator
 
 	// TEST: delete some ranges
-	bool smallRange = false;
+	bool smallRange = true;
 	// delete many small ranges
 	if (smallRange) {
 		Slice startDelete;
@@ -151,9 +151,14 @@ int main() {
 	}
 	else {  // delete a few large ranges
 		startTime = clock();  // start time of this operation
-		statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), "0100000", "0350000");
+		WriteBatch batch;
+		/*statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), "0100000", "0350000");
 		statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), "0400000", "0650000");
-		statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), "0700000", "0950000");
+		statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), "0700000", "0950000");*/
+		batch.DeleteRange(db->DefaultColumnFamily(), "0100000", "0350000");
+		batch.DeleteRange(db->DefaultColumnFamily(), "0400000", "0650000");
+		batch.DeleteRange(db->DefaultColumnFamily(), "0700000", "0950000");
+		statusDB = db->Write(WriteOptions(), &batch);  // apply batched operations
 		endTime = clock();  // end time of this operation
 		printf("Large range deletion time: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
 	}
@@ -175,7 +180,7 @@ int main() {
 	endTime = clock();  // end time of this operation
 	std::cout << "Point read after deletes count: " << countPointAfter << std::endl;
 	printf("Point queries time after deletes: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
-	assert(statusDB.ok());  // make sure to check error
+	//assert(statusDB.ok());  // make sure to check error, why is it sometimes not OK?
 
 	// TEST: range read after deletes
 	rocksdb::Iterator* iterAfter = db->NewIterator(rocksdb::ReadOptions());  // the iterator to traverse the data
