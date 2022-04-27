@@ -128,7 +128,7 @@ int main() {
 	delete iterBefore;  // delete the iterator
 
 	// TEST: delete some ranges
-	bool smallRange = true;
+	bool smallRange = false;
 	// delete many small ranges
 	if (smallRange) {
 		Slice startDelete;
