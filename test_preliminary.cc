@@ -71,7 +71,7 @@ int main() {
 	// TEST: insert a range of distinct keys
 	std::string dataKey;
 	std::string dataValue;
-	int rangeSize = 100000;  // the number of key-value pairs to generate
+	int rangeSize = 1000000;  // the number of key-value pairs to generate
 	int valueLen = 500;  // the length of the values
 	int lenRangeSize = std::to_string(rangeSize).length();
 	startTime = clock();  // start time of this operation
@@ -110,8 +110,8 @@ int main() {
 	assert(statusDB.ok());  // make sure to check error
 
 	// TEST: range read 
-	std::string rangeReadStart = "025000";  // the starting point of the range
-	std::string rangeReadEnd = "074999";  // the ending point of the range
+	std::string rangeReadStart = "0250000";  // the starting point of the range
+	std::string rangeReadEnd = "0749999";  // the ending point of the range
 	// TEST: range read before deletion
 	rocksdb::Iterator* iterBefore = db->NewIterator(rocksdb::ReadOptions());  // the iterator to traverse the data
 	int countRangeReadBefore = 0;
@@ -140,6 +140,7 @@ int main() {
 		endDelete = fixDigit(lenRangeSize, std::to_string(startTemp + rangeDelSize));
 		// native range delete, creating a range tombstone
 		statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), startDelete, endDelete);
+		std::cout << "RANGE DELETED [" << startDelete.ToString() << ", " << endDelete.ToString() << "] " << std::endl;
 		startTemp += rangeSize/10;
 	}
 	endTime = clock();  // end time of this operation
