@@ -71,8 +71,8 @@ int main() {
 	// TEST: insert a range of distinct keys
 	std::string dataKey;
 	std::string dataValue;
-	int rangeSize = 10000;  // the number of key-value pairs to generate
-	int valueLen = 50;  // the length of the values
+	int rangeSize = 100000;  // the number of key-value pairs to generate
+	int valueLen = 500;  // the length of the values
 	int lenRangeSize = std::to_string(rangeSize).length();
 	startTime = clock();  // start time of this operation
 	for (int i = 0; i < rangeSize; i++) {
@@ -90,7 +90,7 @@ int main() {
 	std::string keyRead;  // the key which the point query is interested in
 	std::set<std::string> keyReadSetBefore;  // ensure that we do not repeatedly visit a key
 	std::string valueRead;  // retrieve the value inserted, check what "1" corresponds to
-	int numPointQueries = 1000;
+	int numPointQueries = rangeSize/10;
 	int countPointBefore = 0;
 	// TEST: point read before deletion
 	startTime = clock();  // start time of this operation
@@ -110,15 +110,15 @@ int main() {
 	assert(statusDB.ok());  // make sure to check error
 
 	// TEST: range read 
-	std::string rangeReadStart = "02500";  // the starting point of the range
-	std::string rangeReadEnd = "07499";  // the ending point of the range
+	std::string rangeReadStart = "025000";  // the starting point of the range
+	std::string rangeReadEnd = "074999";  // the ending point of the range
 	// TEST: range read before deletion
 	rocksdb::Iterator* iterBefore = db->NewIterator(rocksdb::ReadOptions());  // the iterator to traverse the data
 	int countRangeReadBefore = 0;
 	startTime = clock();  // start time of this operation
 	for (iterBefore->Seek(rangeReadStart); iterBefore->Valid() && iterBefore->key().ToString() < rangeReadEnd; iterBefore->Next()) {
-		std::cout << "RANGE [" << rangeReadStart << ", " << rangeReadEnd << "] " << iterBefore->key().ToString() << ": " 
-			 	  << iterBefore->value().ToString() << std::endl;
+		//std::cout << "RANGE [" << rangeReadStart << ", " << rangeReadEnd << "] " << iterBefore->key().ToString() << ": " 
+		//	 	  << iterBefore->value().ToString() << std::endl;
 		countRangeReadBefore++;
 	}
 	endTime = clock();  // end time of this operation
@@ -130,9 +130,9 @@ int main() {
 	// TEST: delete some ranges
 	Slice startDelete;
 	Slice endDelete;
-	int rangeDelSize = 100;  // number of elements in each range delete
+	int rangeDelSize = rangeSize/100;  // number of elements in each range delete
 	int numRangeDel = 10;  // number of range deletes
-	int startTemp = 100;
+	int startTemp = rangeSize/100;
 	startTime = clock();  // start time of this operation
 	// ranges to be deleted: 
 	for (int i = 0; i < numRangeDel; i++) {
@@ -140,7 +140,7 @@ int main() {
 		endDelete = fixDigit(lenRangeSize, std::to_string(startTemp + rangeDelSize));
 		// native range delete, creating a range tombstone
 		statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), startDelete, endDelete);
-		startTemp += 1000;
+		startTemp += rangeSize/10;
 	}
 	endTime = clock();  // end time of this operation
 	printf("Range deletion time: %.2fs\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
@@ -169,8 +169,8 @@ int main() {
 	int countRangeReadAfter = 0;
 	startTime = clock();  // start time of this operation
 	for (iterAfter->Seek(rangeReadStart); iterAfter->Valid() && iterAfter->key().ToString() < rangeReadEnd; iterAfter->Next()) {
-		std::cout << "RANGE [" << rangeReadStart << ", " << rangeReadEnd << "] " << iterAfter->key().ToString() << ": " 
-			 	  << iterAfter->value().ToString() << std::endl;
+		//std::cout << "RANGE [" << rangeReadStart << ", " << rangeReadEnd << "] " << iterAfter->key().ToString() << ": " 
+		//	 	  << iterAfter->value().ToString() << std::endl;
 		countRangeReadAfter++;
 	}
 	endTime = clock();  // end time of this operation
