@@ -25,6 +25,31 @@ std::string kDBPath = "C:\\Windows\\TEMP\\rocksdb_project";
 std::string kDBPath = "/tmp/rocksdb_project";
 #endif
 
+// generate a fixed-length string
+// source: https://stackoverflow.com/questions/440133/how-do-i-create-a-random-alpha-numeric-string-in-c
+std::string randomString(const int len) {
+    static const char characters[] =
+        "0123456789"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz";
+    std::string result;
+    result.reserve(len);
+    for (int i = 0; i < len; i++) {
+        result += characters[rand() % (sizeof(characters) - 1)];
+    }
+    return result;
+}
+
+// add zeros to the left of a string if its number of digits are not enough
+std::string fixDigit(const int len, std::string str) {
+	if (str.length() >= len) {return str.substr(0, len);}
+	int numCharToAdd = len - str.length();
+	for (int i = 0; i < numCharToAdd; i++) {
+		str = "0" + str;
+	}
+	return str;
+}
+
 // To access members of a structure, use the dot operator
 // To access members of a structure through a pointer, use the arrow operator
 int main() {
@@ -157,29 +182,4 @@ int main() {
 	// delete the database and end the test
 	delete db;
 	return 0;
-}
-
-// generate a fixed-length string
-// source: https://stackoverflow.com/questions/440133/how-do-i-create-a-random-alpha-numeric-string-in-c
-std::string randomString(const int len) {
-    static const char characters[] =
-        "0123456789"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "abcdefghijklmnopqrstuvwxyz";
-    std::string result;
-    result.reserve(len);
-    for (int i = 0; i < len; i++) {
-        result += characters[rand() % (sizeof(characters) - 1)];
-    }
-    return result;
-}
-
-// add zeros to the left of a string if its number of digits are not enough
-std::string fixDigit(const int len, std::string str) {
-	if (str.length() >= len) {return str.substr(0, len);}
-	int numCharToAdd = len - str.length();
-	for (int i = 0; i < numCharToAdd; i++) {
-		str = "0" + str;
-	}
-	return str;
 }
