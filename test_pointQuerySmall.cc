@@ -64,14 +64,16 @@ int main() {
 	options.OptimizeLevelStyleCompaction();
 	options.create_if_missing = true;  // create the DB if it's not already present
 	// open DB and check the status
+	printf("Opening the DB...\n");
 	Status statusDB = DB::Open(options, kDBPath, &db);
 	assert(statusDB.ok());  // make sure to check error
+	printf("DB opened.\n");
 
 	// TEST: insert a range of distinct keys
 	double insertTotalTime = 0.0;  // the total runtime of insertion
 	std::string dataKey;
 	std::string dataValue;
-	int rangeSize = 1000000;  // the number of key-value pairs to generate
+	int rangeSize = 10000;  // the number of key-value pairs to generate
 	int valueLen = 1000;  // the length of the values
 	int keyLen = std::to_string(rangeSize).length();  // the length of each key
 	printf("Insertion started.\n");
@@ -89,10 +91,10 @@ int main() {
 	printf("Insertion time: %.2fs\n", insertTotalTime);
 
 	// perform some warm-up queries here
+	std::string keyReadTemp;
+	std::string valueReadTemp;
 	printf("Warn-up queries started.\n");
 	for (int i = 0; i < rangeSize/100; i++) {
-		std::string keyReadTemp;
-		std::string valueReadTemp;
 		keyReadTemp = fixDigit(keyLen, std::to_string(rand() % rangeSize));
 		statusDB = db->Get(ReadOptions(), keyReadTemp, &valueReadTemp);
 		assert(statusDB.ok());  // make sure to check error
@@ -163,12 +165,11 @@ int main() {
 		startTime = clock();  // start time of this operation
 		statusDB = db->Get(ReadOptions(), keyRead, &valueRead);
 		endTime = clock();  // end time of this operation
-		if (!statusDB.ok()) {
-			std::cerr << statusDB.ToString() << std::endl;
-		}
-		assert(statusDB.ok());  // make sure to check error
 		pointReadTotalTimeAfter += (double)(endTime - startTime) / CLOCKS_PER_SEC;
-		if (!statusDB.IsNotFound()) {countPointAfter++;}
+		if (!statusDB.IsNotFound()) {
+			assert(statusDB.ok());  // make sure to check error, ignore the case where the key is not found
+			countPointAfter++;
+		}
 		keyReadSetAfter.insert(keyRead);
 	}
 	std::cout << "Point read after deletes count: " << countPointAfter << std::endl;
