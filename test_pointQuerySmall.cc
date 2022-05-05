@@ -74,6 +74,7 @@ int main() {
 	int rangeSize = 1000000;  // the number of key-value pairs to generate
 	int valueLen = 1000;  // the length of the values
 	int keyLen = std::to_string(rangeSize).length();  // the length of each key
+	printf("Insertion started.\n");
 	for (int i = 0; i < rangeSize; i++) {
 		// set up the key
 		dataKey = fixDigit(keyLen, std::to_string(i));
@@ -88,6 +89,7 @@ int main() {
 	printf("Insertion time: %.2fs\n", insertTotalTime);
 
 	// perform some warm-up queries here
+	printf("Warn-up queries started.\n");
 	for (int i = 0; i < rangeSize/100; i++) {
 		std::string keyReadTemp;
 		std::string valueReadTemp;
@@ -95,7 +97,7 @@ int main() {
 		statusDB = db->Get(ReadOptions(), keyReadTemp, &valueReadTemp);
 		assert(statusDB.ok());  // make sure to check error
 	}
-	printf("Warn-up queries done.");
+	printf("Warn-up queries done.\n");
 
 	// TEST: point read, check both present & invalidated keys, do not check non-existing keys
 	std::string keyRead;  // the key which the point query is interested in
@@ -106,6 +108,7 @@ int main() {
 	// TEST: point read before deletion
 	double pointReadTotalTime = 0.0;  // total time of the point queries
 	// perform some random point queries
+	printf("Point read before deletes started.\n");
 	for (int i = 0; i < numPointQueries; i++) {
 		keyRead = fixDigit(keyLen, std::to_string(rand() % rangeSize));
 		// ensure that we do not re-read an entry
@@ -150,6 +153,7 @@ int main() {
 	std::set<std::string> keyReadSetAfter;  // ensure that we do not repeatedly visit a key
 	int countPointAfter = 0;
 	double pointReadTotalTimeAfter = 0.0;  // total time of the point queries
+	printf("Point read after deletes started.\n");
 	// perform some random point queries
 	for (int i = 0; i < numPointQueries; i++) {
 		keyRead = fixDigit(keyLen, std::to_string(rand() % rangeSize));
@@ -159,6 +163,9 @@ int main() {
 		startTime = clock();  // start time of this operation
 		statusDB = db->Get(ReadOptions(), keyRead, &valueRead);
 		endTime = clock();  // end time of this operation
+		if (!statusDB.ok()) {
+			std::cerr << statusDB.ToString() << std::endl;
+		}
 		assert(statusDB.ok());  // make sure to check error
 		pointReadTotalTimeAfter += (double)(endTime - startTime) / CLOCKS_PER_SEC;
 		if (!statusDB.IsNotFound()) {countPointAfter++;}
