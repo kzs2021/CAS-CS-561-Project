@@ -75,7 +75,8 @@ int main() {
 	std::string dataValue;
 	int rangeSize = 10000;  // the number of key-value pairs to generate
 	int valueLen = 1000;  // the length of the values
-	int keyLen = std::to_string(rangeSize).length();  // the length of each key
+	//int keyLen = std::to_string(rangeSize).length();  // the length of each key
+	int keyLen = 24;  // the length of each key
 	printf("Insertion started.\n");
 	for (int i = 0; i < rangeSize; i++) {
 		// set up the key
@@ -88,9 +89,9 @@ int main() {
 		insertTotalTime += (double)(endTime - startTime) / CLOCKS_PER_SEC;
 		assert(statusDB.ok());  // make sure to check error
 	}
-	printf("Insertion time: %.2fs\n", insertTotalTime);
+	printf("Insertion time: %.6fs\n", insertTotalTime);
 
-	// perform some warm-up queries here
+	// perform some warm-up point queries here
 	std::string keyReadTemp;
 	std::string valueReadTemp;
 	printf("Warn-up queries started.\n");
@@ -126,7 +127,7 @@ int main() {
 		keyReadSetBefore.insert(keyRead);
 	}
 	std::cout << "Point read before deletes count: " << countPointBefore << std::endl;
-	printf("Point queries runtime before deletes: %.2fs\n", pointReadTotalTime);
+	printf("Point queries runtime before deletes: %.6fs\n", pointReadTotalTime);
 
 	// delete many small ranges
 	Slice startDelete;
@@ -139,7 +140,7 @@ int main() {
 	for (int i = 0; i < numRangeDel; i++) {
 		// set start (inclusive) and end (exclusive) of the range
 		startDelete = fixDigit(keyLen, std::to_string(startTemp));
-		endDelete = fixDigit(keyLen, std::to_string(startTemp + rangeDelSize));
+		endDelete = fixDigit(keyLen, std::to_string(startTemp + rangeDelSize + 1));
 		// native range delete, creating a range tombstone
 		startTime = clock();  // start time of this operation
 		statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), startDelete, endDelete);
@@ -149,7 +150,7 @@ int main() {
 		std::cout << "RANGE DELETED [" << startDelete.ToString() << ", " << endDelete.ToString() << "] " << std::endl;
 		startTemp += rangeSize/10;
 	}
-	printf("Small range deletion time: %.2fs\n", rangeDelTotalTime);
+	printf("Small range deletion time: %.6fs\n", rangeDelTotalTime);
 	
 	// TEST: point query after deletion
 	std::set<std::string> keyReadSetAfter;  // ensure that we do not repeatedly visit a key
@@ -173,7 +174,7 @@ int main() {
 		keyReadSetAfter.insert(keyRead);
 	}
 	std::cout << "Point read after deletes count: " << countPointAfter << std::endl;
-	printf("Point queries time after deletes: %.2fs\n", pointReadTotalTimeAfter);
+	printf("Point queries time after deletes: %.6fs\n", pointReadTotalTimeAfter);
 	
 	// delete the database and end the test
 	delete db;
