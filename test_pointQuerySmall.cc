@@ -4,10 +4,13 @@
 #include <ctime>
 #include <iostream>
 #include <set>
+#include <array>
 
 #include "rocksdb/db.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/options.h"
+#include "rocksdb/iostats_context.h"
+#include "rocksdb/perf_context.h"
 
 using ROCKSDB_NAMESPACE::DB;
 using ROCKSDB_NAMESPACE::Options;
@@ -68,15 +71,32 @@ int main() {
 	Status statusDB = DB::Open(options, kDBPath, &db);
 	assert(statusDB.ok());  // make sure to check error
 	printf("DB opened.\n");
+	// initialize the performance & I/O stats contexts
+	rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableTimeExceptForMutex);
+	rocksdb::PerfContext perfContext = *(rocksdb::get_perf_context());
+	rocksdb::IOStatsContext ioContext = *(rocksdb::get_iostats_context());
+	perfContext.Reset();
+	ioContext.Reset();
+	// initialize approximate size info
+	std::array<rocksdb::Range, 1> ranges;
+  	std::array<uint64_t, 1> sizes;
+  	rocksdb::SizeApproximationOptions SAoptions;
+  	SAoptions.include_memtables = true;
+  	SAoptions.files_size_error_margin = 0.1;
 
 	// TEST: insert a range of distinct keys
 	double insertTotalTime = 0.0;  // the total runtime of insertion
 	std::string dataKey;
 	std::string dataValue;
 	int rangeSize = 10000;  // the number of key-value pairs to generate
-	int valueLen = 1000;  // the length of the values
+	int numPointQueries = rangeSize/10;  // number of point queries to perform
+	int valueLen = 1012;  // the length of the values
 	//int keyLen = std::to_string(rangeSize).length();  // the length of each key
-	int keyLen = 24;  // the length of each key
+	int keyLen = 12;  // the length of each key
+	// initialize the containers for the size info
+	ranges[0].start = fixDigit(keyLen, std::to_string(0));
+	ranges[0].limit = fixDigit(keyLen, std::to_string(rangeSize - 1));
+	// generate the workload
 	printf("Insertion started.\n");
 	for (int i = 0; i < rangeSize; i++) {
 		// set up the key
@@ -90,23 +110,32 @@ int main() {
 		assert(statusDB.ok());  // make sure to check error
 	}
 	printf("Insertion time: %.6fs\n", insertTotalTime);
+	std::cout << rangeSize << " key-value pairs inserted." << std::endl;
+	/*
+	std::cout << "=======================================" << std::endl;
+	std::cout << perfContext.get_cpu_nanos << std::endl;
+	std::cout << "=======================================" << std::endl;
+	std::cout << ioContext.read_nanos << std::endl;
+	*/
+  	statusDB = db->GetApproximateSizes(SAoptions, db->DefaultColumnFamily(), ranges.data(), 1, sizes.data());
+	assert(statusDB.ok());  // make sure to check error
+	std::cout << "Size after insertion: " << sizes[0] << std::endl;
 
 	// perform some warm-up point queries here
 	std::string keyReadTemp;
 	std::string valueReadTemp;
-	printf("Warn-up queries started.\n");
-	for (int i = 0; i < rangeSize/100; i++) {
+	printf("Warn-up queries before deletes started.\n");
+	for (int i = 0; i < numPointQueries; i++) {
 		keyReadTemp = fixDigit(keyLen, std::to_string(rand() % rangeSize));
 		statusDB = db->Get(ReadOptions(), keyReadTemp, &valueReadTemp);
 		assert(statusDB.ok());  // make sure to check error
 	}
-	printf("Warn-up queries done.\n");
+	printf("Warn-up queries before deletes done.\n");
 
 	// TEST: point read, check both present & invalidated keys, do not check non-existing keys
 	std::string keyRead;  // the key which the point query is interested in
 	std::set<std::string> keyReadSetBefore;  // ensure that we do not repeatedly visit a key
 	std::string valueRead;  // retrieve the value inserted
-	int numPointQueries = rangeSize/10;  // number of point queries to perform
 	int countPointBefore = 0;  // count the number of valid entries retrieved
 	// TEST: point read before deletion
 	double pointReadTotalTime = 0.0;  // total time of the point queries
@@ -128,6 +157,17 @@ int main() {
 	}
 	std::cout << "Point read before deletes count: " << countPointBefore << std::endl;
 	printf("Point queries runtime before deletes: %.6fs\n", pointReadTotalTime);
+	printf("Read throughput before deletes: %.6fentries/s\n", countPointBefore/pointReadTotalTime);
+	/*
+	std::cout << "=======================================" << std::endl;
+	std::cout << perfContext.internal_delete_skipped_count << std::endl;
+	std::cout << "=======================================" << std::endl;
+	std::cout << ioContext.bytes_read << std::endl;
+	*/
+
+	statusDB = db->GetApproximateSizes(SAoptions, db->DefaultColumnFamily(), ranges.data(), 1, sizes.data());
+	assert(statusDB.ok());  // make sure to check error
+	std::cout << "Size after 1st read: " << sizes[0] << std::endl;
 
 	// delete many small ranges
 	Slice startDelete;
@@ -151,11 +191,27 @@ int main() {
 		startTemp += rangeSize/10;
 	}
 	printf("Small range deletion time: %.6fs\n", rangeDelTotalTime);
+	// get the size info
+	statusDB = db->GetApproximateSizes(SAoptions, db->DefaultColumnFamily(), ranges.data(), 1, sizes.data());
+	assert(statusDB.ok());  // make sure to check error
+	std::cout << "Size after deletes: " << sizes[0] << std::endl;
 	
+	// perform some warm-up point queries here
+	printf("Warn-up queries after deletes started.\n");
+	for (int i = 0; i < numPointQueries; i++) {
+		keyReadTemp = fixDigit(keyLen, std::to_string(rand() % rangeSize));
+		statusDB = db->Get(ReadOptions(), keyReadTemp, &valueReadTemp);
+		if (!statusDB.IsNotFound()) {assert(statusDB.ok());}  // make sure to check error
+	}
+	printf("Warn-up queries after deletes done.\n");
+
 	// TEST: point query after deletion
 	std::set<std::string> keyReadSetAfter;  // ensure that we do not repeatedly visit a key
-	int countPointAfter = 0;
+	int countPointValidAfter = 0;  // count the number of valid entries retrieved
+	int countPointInvalidAfter = 0;  // count the number of invalid entries retrieved
 	double pointReadTotalTimeAfter = 0.0;  // total time of the point queries
+	double validPointReadTotalTime = 0.0;
+	double invalidPointReadTotalTime = 0.0;
 	printf("Point read after deletes started.\n");
 	// perform some random point queries
 	for (int i = 0; i < numPointQueries; i++) {
@@ -169,12 +225,32 @@ int main() {
 		pointReadTotalTimeAfter += (double)(endTime - startTime) / CLOCKS_PER_SEC;
 		if (!statusDB.IsNotFound()) {
 			assert(statusDB.ok());  // make sure to check error, ignore the case where the key is not found
-			countPointAfter++;
+			validPointReadTotalTime += (double)(endTime - startTime) / CLOCKS_PER_SEC;
+			countPointValidAfter++;
+		}
+		else {
+			invalidPointReadTotalTime += (double)(endTime - startTime) / CLOCKS_PER_SEC;
+			countPointInvalidAfter++;
 		}
 		keyReadSetAfter.insert(keyRead);
 	}
-	std::cout << "Point read after deletes count: " << countPointAfter << std::endl;
+	std::cout << "Point read (valid) after deletes count: " << countPointValidAfter << std::endl;
+	std::cout << "Point read (invalid) after deletes count: " << countPointInvalidAfter << std::endl;
 	printf("Point queries time after deletes: %.6fs\n", pointReadTotalTimeAfter);
+	printf("Time spent for reading valid entries: %.6fs\n", validPointReadTotalTime);
+	printf("Time spent for reading invalid entries: %.6fs\n", invalidPointReadTotalTime);
+	printf("Average read throughput after deletes: %.6f entries/s\n", numPointQueries/pointReadTotalTimeAfter);
+	printf("Read throughput (valid) after deletes: %.6f entries/s\n", countPointValidAfter/validPointReadTotalTime);
+	printf("Read throughput (invalid) after deletes: %.6f entries/s\n", countPointInvalidAfter/invalidPointReadTotalTime);
+	/*
+	std::cout << "=======================================" << std::endl;
+	std::cout << perfContext.internal_delete_skipped_count << std::endl;
+	std::cout << "=======================================" << std::endl;
+	std::cout << ioContext.cpu_read_nanos << std::endl;
+	*/
+	statusDB = db->GetApproximateSizes(SAoptions, db->DefaultColumnFamily(), ranges.data(), 1, sizes.data());
+	assert(statusDB.ok());  // make sure to check error
+	std::cout << "Size after 2nd read: " << sizes[0] << std::endl;
 	
 	// delete the database and end the test
 	delete db;
