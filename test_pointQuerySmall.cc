@@ -53,19 +53,37 @@ std::string fixDigit(const int len, std::string str) {
 	return str;
 }
 
+// do some warm-up Queries
+void warmUp(Status statusDB, DB* db, int rangeSize, int keyLen, int warmUpNum, std::string info) {
+	std::string keyReadTemp;
+	std::string valueReadTemp;
+	std::cout << "Warn-up queries " << info << " started." << std::endl;
+	for (int i = 0; i < warmUpNum; i++) {
+		keyReadTemp = fixDigit(keyLen, std::to_string(rand() % rangeSize));
+		statusDB = db->Get(ReadOptions(), keyReadTemp, &valueReadTemp);
+		if (!statusDB.IsNotFound()) {
+			assert(statusDB.ok());  // make sure to check error
+		}
+	}
+	std::cout << "Warn-up queries " << info << " done." << std::endl;
+}
+
 // To access members of a structure, use the dot operator
 // To access members of a structure through a pointer, use the arrow operator
 int main() {
 	// initialize the database and the options
 	DB* db;
 	Options options;
+	// disable background compactions
+	Options::AdvancedColumnFamilyOptions ACFoption;
+	ACFoption.compaction_style = rocksdb::CompactionStyle::kCompactionStyleNone;
 	// initialize the timing variables
 	clock_t startTime = clock();
 	clock_t endTime = clock();
 	// optimization
 	options.IncreaseParallelism();
 	options.OptimizeLevelStyleCompaction();
-	options.create_if_missing = true;  // create the DB if it's not already present
+	options.create_if_missing = true;  // create the DB if it is not already present
 	// open DB and check the status
 	printf("Opening the DB...\n");
 	Status statusDB = DB::Open(options, kDBPath, &db);
@@ -77,12 +95,19 @@ int main() {
 	rocksdb::IOStatsContext ioContext = *(rocksdb::get_iostats_context());
 	perfContext.Reset();
 	ioContext.Reset();
+	bool showPerfStats = false;
 	// initialize approximate size info
 	std::array<rocksdb::Range, 1> ranges;
   	std::array<uint64_t, 1> sizes;
   	rocksdb::SizeApproximationOptions SAoptions;
   	SAoptions.include_memtables = true;
-  	SAoptions.files_size_error_margin = 0.1;
+  	SAoptions.files_size_error_margin = -1.0;
+	// whether to warm-up
+	bool isWarmUp = false;
+	// determine whether or not we are testing "many-small-range" or "a-few-large-range"
+	bool isManySmall = true;
+	// delete 3 big ranges, with a much higher deletion selectivity
+	bool isVeryBig = true;
 
 	// TEST: insert a range of distinct keys
 	double insertTotalTime = 0.0;  // the total runtime of insertion
@@ -90,8 +115,8 @@ int main() {
 	std::string dataValue;
 	int rangeSize = 10000;  // the number of key-value pairs to generate
 	int numPointQueries = rangeSize/10;  // number of point queries to perform
+	// assume that each character has size 1 byte, ensure that one key-value pair has 1024 bytes
 	int valueLen = 1012;  // the length of the values
-	//int keyLen = std::to_string(rangeSize).length();  // the length of each key
 	int keyLen = 12;  // the length of each key
 	// initialize the containers for the size info
 	ranges[0].start = fixDigit(keyLen, std::to_string(0));
@@ -112,30 +137,29 @@ int main() {
 	printf("Insertion time: %.6fs\n", insertTotalTime);
 	std::cout << rangeSize << " key-value pairs inserted." << std::endl;
 
-	perfContext = *(rocksdb::get_perf_context());
-	ioContext = *(rocksdb::get_iostats_context());
-	rocksdb::SetPerfLevel(rocksdb::PerfLevel::kDisable);
-	std::cout << "=======================================" << std::endl;
-	std::cout << perfContext.ToString() << std::endl;
-	std::cout << "=======================================" << std::endl;
-	std::cout << ioContext.ToString() << std::endl;
+	if (showPerfStats) {
+		perfContext = *(rocksdb::get_perf_context());
+		ioContext = *(rocksdb::get_iostats_context());
+		rocksdb::SetPerfLevel(rocksdb::PerfLevel::kDisable);
+		std::cout << "=======================================" << std::endl;
+		std::cout << perfContext.ToString() << std::endl;
+		std::cout << "=======================================" << std::endl;
+		std::cout << ioContext.ToString() << std::endl;
+	}
 
   	statusDB = db->GetApproximateSizes(SAoptions, db->DefaultColumnFamily(), ranges.data(), 1, sizes.data());
 	assert(statusDB.ok());  // make sure to check error
 	std::cout << "Size after insertion: " << sizes[0] << " bytes" << std::endl;
 
-	// perform some warm-up point queries here
-	std::string keyReadTemp;
-	std::string valueReadTemp;
-	printf("Warn-up queries before deletes started.\n");
-	for (int i = 0; i < numPointQueries; i++) {
-		keyReadTemp = fixDigit(keyLen, std::to_string(rand() % rangeSize));
-		statusDB = db->Get(ReadOptions(), keyReadTemp, &valueReadTemp);
-		assert(statusDB.ok());  // make sure to check error
+	if (isWarmUp) {
+		// perform some warm-up point queries here
+		warmUp(statusDB, db, rangeSize, keyLen, numPointQueries/2, "before range deletes");
 	}
-	printf("Warn-up queries before deletes done.\n");
 
-	// TEST: point read, check both present & invalidated keys, do not check non-existing keys
+	// TEST: point read before range deletes, check both present & invalidated keys, do not check non-existing keys
+	rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableTimeAndCPUTimeExceptForMutex);
+	perfContext.Reset();
+	ioContext.Reset();
 	std::string keyRead;  // the key which the point query is interested in
 	std::set<std::string> keyReadSetBefore;  // ensure that we do not repeatedly visit a key
 	std::string valueRead;  // retrieve the value inserted
@@ -160,32 +184,56 @@ int main() {
 	}
 	std::cout << "Point read before deletes count: " << countPointBefore << std::endl;
 	printf("Point queries runtime before deletes: %.6fs\n", pointReadTotalTime);
-	printf("Read throughput before deletes: %.6fentries/s\n", countPointBefore/pointReadTotalTime);
-	
-	perfContext = *(rocksdb::get_perf_context());
-	ioContext = *(rocksdb::get_iostats_context());
-	rocksdb::SetPerfLevel(rocksdb::PerfLevel::kDisable);
-	std::cout << "=======================================" << std::endl;
-	std::cout << perfContext.ToString() << std::endl;
-	std::cout << "=======================================" << std::endl;
-	std::cout << ioContext.ToString() << std::endl;
-
+	printf("Read throughput before deletes: %.6f entries/s\n", countPointBefore/pointReadTotalTime);
+	if (showPerfStats) {
+		// output perf context & iostats context results
+		perfContext = *(rocksdb::get_perf_context());
+		ioContext = *(rocksdb::get_iostats_context());
+		rocksdb::SetPerfLevel(rocksdb::PerfLevel::kDisable);
+		std::cout << "perf_context before deletes: " << std::endl;
+		std::cout << perfContext.ToString() << std::endl;
+		std::cout << "iostats_context before deletes: " << std::endl;
+		std::cout << ioContext.ToString() << std::endl;
+	}
+	// obtain the info of size
 	statusDB = db->GetApproximateSizes(SAoptions, db->DefaultColumnFamily(), ranges.data(), 1, sizes.data());
 	assert(statusDB.ok());  // make sure to check error
 	std::cout << "Size after 1st read: " << sizes[0] << " bytes" << std::endl;
 
-	// delete many small ranges
+	// delete ranges
 	Slice startDelete;
 	Slice endDelete;
-	int rangeDelSize = rangeSize/100;  // number of elements in each range delete
-	int numRangeDel = 10;  // number of range deletes
+	int rangeDelSize;  // number of elements in each range delete
+	int gapSize;  // maintaining a constant-sized gap between the deleted ranges
+	int numRangeDel;  // number of range deletes
 	int startTemp = rangeSize/100;  // initial starting point of the deletes
+	if (isManySmall) {
+		rangeDelSize = rangeSize/20;
+		gapSize = rangeSize/10;
+		numRangeDel = 10;
+	}
+	else {
+		if (isVeryBig) {
+			startTemp = rangeSize/10;
+			rangeDelSize = rangeSize/4;
+			gapSize = 3*rangeSize/10;
+			numRangeDel = 3;
+		}
+		else {
+			rangeDelSize = rangeSize/8;
+			gapSize = 2*(rangeDelSize + rangeSize/100);
+			numRangeDel = 4;
+		}
+	}
 	double rangeDelTotalTime = 0.0;  // total time of the deletes
 	// ranges to be deleted: 
 	for (int i = 0; i < numRangeDel; i++) {
-		// set start (inclusive) and end (exclusive) of the range
+		// set start (inclusive) and end (inclusive) of the range
+		// I thought the end is exclusive, and the documentation implies that it is exclusive, but it is actually inclusive
+		// this can be confirmed by doing a full scan after the range deletes
+		// some documentations of RocksDB are not up-to-date enough and have typos
 		startDelete = fixDigit(keyLen, std::to_string(startTemp));
-		endDelete = fixDigit(keyLen, std::to_string(startTemp + rangeDelSize + 1));
+		endDelete = fixDigit(keyLen, std::to_string(startTemp + rangeDelSize));
 		// native range delete, creating a range tombstone
 		startTime = clock();  // start time of this operation
 		statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), startDelete, endDelete);
@@ -193,22 +241,20 @@ int main() {
 		assert(statusDB.ok());  // make sure to check error
 		rangeDelTotalTime += (double)(endTime - startTime) / CLOCKS_PER_SEC;
 		std::cout << "RANGE DELETED [" << startDelete.ToString() << ", " << endDelete.ToString() << "] " << std::endl;
-		startTemp += rangeSize/10;
+		startTemp += gapSize;
 	}
-	printf("Small range deletion time: %.6fs\n", rangeDelTotalTime);
+	printf("Range deletion time: %.6fs\n", rangeDelTotalTime);
+	std::cout << "Number of range deletes: " << numRangeDel << std::endl;
+	std::cout << "Size of each range delete: " << rangeDelSize << std::endl;
 	// get the size info
 	statusDB = db->GetApproximateSizes(SAoptions, db->DefaultColumnFamily(), ranges.data(), 1, sizes.data());
 	assert(statusDB.ok());  // make sure to check error
 	std::cout << "Size after deletes: " << sizes[0] << " bytes" << std::endl;
 	
-	// perform some warm-up point queries here
-	printf("Warn-up queries after deletes started.\n");
-	for (int i = 0; i < numPointQueries; i++) {
-		keyReadTemp = fixDigit(keyLen, std::to_string(rand() % rangeSize));
-		statusDB = db->Get(ReadOptions(), keyReadTemp, &valueReadTemp);
-		if (!statusDB.IsNotFound()) {assert(statusDB.ok());}  // make sure to check error
+	if (isWarmUp) {
+		// perform some warm-up point queries here
+		warmUp(statusDB, db, rangeSize, keyLen, numPointQueries/2, "after range deletes");
 	}
-	printf("Warn-up queries after deletes done.\n");
 
 	// TEST: point query after deletion
 	std::set<std::string> keyReadSetAfter;  // ensure that we do not repeatedly visit a key
@@ -247,15 +293,15 @@ int main() {
 	printf("Average read throughput after deletes: %.6f entries/s\n", numPointQueries/pointReadTotalTimeAfter);
 	printf("Read throughput (valid) after deletes: %.6f entries/s\n", countPointValidAfter/validPointReadTotalTime);
 	printf("Read throughput (invalid) after deletes: %.6f entries/s\n", countPointInvalidAfter/invalidPointReadTotalTime);
-	
-	perfContext = *(rocksdb::get_perf_context());
-	ioContext = *(rocksdb::get_iostats_context());
-	rocksdb::SetPerfLevel(rocksdb::PerfLevel::kDisable);
-	std::cout << "=======================================" << std::endl;
-	std::cout << perfContext.ToString() << std::endl;
-	std::cout << "=======================================" << std::endl;
-	std::cout << ioContext.ToString() << std::endl;
-
+	if (showPerfStats) {
+		perfContext = *(rocksdb::get_perf_context());
+		ioContext = *(rocksdb::get_iostats_context());
+		rocksdb::SetPerfLevel(rocksdb::PerfLevel::kDisable);
+		std::cout << "=======================================" << std::endl;
+		std::cout << perfContext.ToString() << std::endl;
+		std::cout << "=======================================" << std::endl;
+		std::cout << ioContext.ToString() << std::endl;
+	}
 	statusDB = db->GetApproximateSizes(SAoptions, db->DefaultColumnFamily(), ranges.data(), 1, sizes.data());
 	assert(statusDB.ok());  // make sure to check error
 	std::cout << "Size after 2nd read: " << sizes[0] << " bytes" << std::endl;
