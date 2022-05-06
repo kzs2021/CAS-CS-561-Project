@@ -29,7 +29,7 @@ std::string kDBPath = "/tmp/rocksdb_project";
 #endif
 
 // generate a fixed-length string
-// source: https://stackoverflow.com/questions/440133/how-do-i-create-a-random-alpha-numeric-string-in-c
+// reference: https://stackoverflow.com/questions/440133/how-do-i-create-a-random-alpha-numeric-string-in-c
 std::string randomString(const int len) {
     static const char characters[] =
         "0123456789"
@@ -57,7 +57,7 @@ std::string fixDigit(const int len, std::string str) {
 void warmUp(Status statusDB, DB* db, int rangeSize, int keyLen, int warmUpNum, std::string info) {
 	std::string keyReadTemp;
 	std::string valueReadTemp;
-	std::cout << "Warn-up queries " << info << " started." << std::endl;
+	std::cout << "Warn-up queries" << info << "started." << std::endl;
 	for (int i = 0; i < warmUpNum; i++) {
 		keyReadTemp = fixDigit(keyLen, std::to_string(rand() % rangeSize));
 		statusDB = db->Get(ReadOptions(), keyReadTemp, &valueReadTemp);
@@ -65,7 +65,7 @@ void warmUp(Status statusDB, DB* db, int rangeSize, int keyLen, int warmUpNum, s
 			assert(statusDB.ok());  // make sure to check error
 		}
 	}
-	std::cout << "Warn-up queries " << info << " done." << std::endl;
+	std::cout << "Warn-up queries" << info << "done." << std::endl;
 }
 
 // To access members of a structure, use the dot operator
@@ -74,47 +74,56 @@ int main() {
 	// initialize the database and the options
 	DB* db;
 	Options options;
-	// disable background compactions
-	Options::AdvancedColumnFamilyOptions ACFoption;
-	ACFoption.compaction_style = rocksdb::CompactionStyle::kCompactionStyleNone;
+	// disable background & auto compactions
+	options.compaction_style = ROCKSDB_NAMESPACE::kCompactionStyleNone;
+	options.disable_auto_compactions = true;
+	// flushing options, flush the memtable to file
+	rocksdb::FlushOptions FlOptions;
+
 	// initialize the timing variables
-	clock_t startTime = clock();
-	clock_t endTime = clock();
+	clock_t startTime;
+	clock_t endTime;
+
 	// optimization
 	options.IncreaseParallelism();
 	options.OptimizeLevelStyleCompaction();
 	options.create_if_missing = true;  // create the DB if it is not already present
+
 	// open DB and check the status
 	printf("Opening the DB...\n");
 	Status statusDB = DB::Open(options, kDBPath, &db);
 	assert(statusDB.ok());  // make sure to check error
 	printf("DB opened.\n");
+
 	// initialize the performance & I/O stats contexts
 	rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableTimeAndCPUTimeExceptForMutex);
 	rocksdb::PerfContext perfContext = *(rocksdb::get_perf_context());
 	rocksdb::IOStatsContext ioContext = *(rocksdb::get_iostats_context());
 	perfContext.Reset();
 	ioContext.Reset();
-	bool showPerfStats = false;
+	bool showPerfStats = false;  // whether or not to show the stats info
+
 	// initialize approximate size info
 	std::array<rocksdb::Range, 1> ranges;
   	std::array<uint64_t, 1> sizes;
   	rocksdb::SizeApproximationOptions SAoptions;
-  	SAoptions.include_memtables = true;
-  	SAoptions.files_size_error_margin = -1.0;
+  	SAoptions.include_memtables = false;  // include memtable size
+  	SAoptions.files_size_error_margin = -1.0;  // error tolerance
+	SAoptions.include_files = true;  // include file size
+
 	// whether to warm-up
 	bool isWarmUp = false;
 	// determine whether or not we are testing "many-small-range" or "a-few-large-range"
-	bool isManySmall = true;
+	bool isManySmall = false;
 	// delete 3 big ranges, with a much higher deletion selectivity
 	bool isVeryBig = true;
+	std::cout << "isManySmall = " << isManySmall << ", " << "isVeryBig = " << isVeryBig << std::endl;
 
 	// TEST: insert a range of distinct keys
-	double insertTotalTime = 0.0;  // the total runtime of insertion
-	std::string dataKey;
-	std::string dataValue;
 	int rangeSize = 10000;  // the number of key-value pairs to generate
 	int numPointQueries = rangeSize/10;  // number of point queries to perform
+	std::string dataKey;
+	std::string dataValue;
 	// assume that each character has size 1 byte, ensure that one key-value pair has 1024 bytes
 	int valueLen = 1012;  // the length of the values
 	int keyLen = 12;  // the length of each key
@@ -122,20 +131,25 @@ int main() {
 	ranges[0].start = fixDigit(keyLen, std::to_string(0));
 	ranges[0].limit = fixDigit(keyLen, std::to_string(rangeSize - 1));
 	// generate the workload
+	double insertTotalTime = 0.0;  // the total runtime of insertion
 	printf("Insertion started.\n");
 	for (int i = 0; i < rangeSize; i++) {
 		// set up the key
 		dataKey = fixDigit(keyLen, std::to_string(i));
 		// set up the value, which is a random string
 		dataValue = randomString(valueLen);
-		startTime = clock();  // start time of this single operation
+		// start time of this single operation
+		startTime = clock();
 		statusDB = db->Put(WriteOptions(), dataKey, dataValue);
-		endTime = clock();  // end time of this single operation
+		endTime = clock();
+		// end time of this single operation
 		insertTotalTime += (double)(endTime - startTime) / CLOCKS_PER_SEC;
 		assert(statusDB.ok());  // make sure to check error
 	}
 	printf("Insertion time: %.6fs\n", insertTotalTime);
 	std::cout << rangeSize << " key-value pairs inserted." << std::endl;
+	
+	db->Flush(FlOptions);
 
 	if (showPerfStats) {
 		perfContext = *(rocksdb::get_perf_context());
@@ -233,16 +247,19 @@ int main() {
 		// this can be confirmed by doing a full scan after the range deletes
 		// some documentations of RocksDB are not up-to-date enough and have typos
 		startDelete = fixDigit(keyLen, std::to_string(startTemp));
-		endDelete = fixDigit(keyLen, std::to_string(startTemp + rangeDelSize));
+		endDelete = fixDigit(keyLen, std::to_string(startTemp + rangeDelSize + 1));
 		// native range delete, creating a range tombstone
 		startTime = clock();  // start time of this operation
 		statusDB = db->DeleteRange(WriteOptions(), db->DefaultColumnFamily(), startDelete, endDelete);
 		endTime = clock();  // end time of this operation
 		assert(statusDB.ok());  // make sure to check error
 		rangeDelTotalTime += (double)(endTime - startTime) / CLOCKS_PER_SEC;
-		std::cout << "RANGE DELETED [" << startDelete.ToString() << ", " << endDelete.ToString() << "] " << std::endl;
+		std::cout << "RANGE DELETED [" << startDelete.ToString() << ", " << endDelete.ToString() << ") " << std::endl;
 		startTemp += gapSize;
 	}
+
+	db->Flush(FlOptions);
+
 	printf("Range deletion time: %.6fs\n", rangeDelTotalTime);
 	std::cout << "Number of range deletes: " << numRangeDel << std::endl;
 	std::cout << "Size of each range delete: " << rangeDelSize << std::endl;
@@ -250,7 +267,7 @@ int main() {
 	statusDB = db->GetApproximateSizes(SAoptions, db->DefaultColumnFamily(), ranges.data(), 1, sizes.data());
 	assert(statusDB.ok());  // make sure to check error
 	std::cout << "Size after deletes: " << sizes[0] << " bytes" << std::endl;
-	
+
 	if (isWarmUp) {
 		// perform some warm-up point queries here
 		warmUp(statusDB, db, rangeSize, keyLen, numPointQueries/2, "after range deletes");
@@ -302,6 +319,9 @@ int main() {
 		std::cout << "=======================================" << std::endl;
 		std::cout << ioContext.ToString() << std::endl;
 	}
+
+	db->Flush(FlOptions);
+
 	statusDB = db->GetApproximateSizes(SAoptions, db->DefaultColumnFamily(), ranges.data(), 1, sizes.data());
 	assert(statusDB.ok());  // make sure to check error
 	std::cout << "Size after 2nd read: " << sizes[0] << " bytes" << std::endl;
