@@ -72,7 +72,7 @@ int main() {
 	assert(statusDB.ok());  // make sure to check error
 	printf("DB opened.\n");
 	// initialize the performance & I/O stats contexts
-	rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableTimeExceptForMutex);
+	rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableTimeAndCPUTimeExceptForMutex);
 	rocksdb::PerfContext perfContext = *(rocksdb::get_perf_context());
 	rocksdb::IOStatsContext ioContext = *(rocksdb::get_iostats_context());
 	perfContext.Reset();
@@ -111,15 +111,18 @@ int main() {
 	}
 	printf("Insertion time: %.6fs\n", insertTotalTime);
 	std::cout << rangeSize << " key-value pairs inserted." << std::endl;
-	/*
+
+	perfContext = *(rocksdb::get_perf_context());
+	ioContext = *(rocksdb::get_iostats_context());
+	rocksdb::SetPerfLevel(rocksdb::PerfLevel::kDisable);
 	std::cout << "=======================================" << std::endl;
-	std::cout << perfContext.get_cpu_nanos << std::endl;
+	std::cout << perfContext.ToString() << std::endl;
 	std::cout << "=======================================" << std::endl;
-	std::cout << ioContext.read_nanos << std::endl;
-	*/
+	std::cout << ioContext.ToString() << std::endl;
+
   	statusDB = db->GetApproximateSizes(SAoptions, db->DefaultColumnFamily(), ranges.data(), 1, sizes.data());
 	assert(statusDB.ok());  // make sure to check error
-	std::cout << "Size after insertion: " << sizes[0] << std::endl;
+	std::cout << "Size after insertion: " << sizes[0] << " bytes" << std::endl;
 
 	// perform some warm-up point queries here
 	std::string keyReadTemp;
@@ -158,16 +161,18 @@ int main() {
 	std::cout << "Point read before deletes count: " << countPointBefore << std::endl;
 	printf("Point queries runtime before deletes: %.6fs\n", pointReadTotalTime);
 	printf("Read throughput before deletes: %.6fentries/s\n", countPointBefore/pointReadTotalTime);
-	/*
+	
+	perfContext = *(rocksdb::get_perf_context());
+	ioContext = *(rocksdb::get_iostats_context());
+	rocksdb::SetPerfLevel(rocksdb::PerfLevel::kDisable);
 	std::cout << "=======================================" << std::endl;
-	std::cout << perfContext.internal_delete_skipped_count << std::endl;
+	std::cout << perfContext.ToString() << std::endl;
 	std::cout << "=======================================" << std::endl;
-	std::cout << ioContext.bytes_read << std::endl;
-	*/
+	std::cout << ioContext.ToString() << std::endl;
 
 	statusDB = db->GetApproximateSizes(SAoptions, db->DefaultColumnFamily(), ranges.data(), 1, sizes.data());
 	assert(statusDB.ok());  // make sure to check error
-	std::cout << "Size after 1st read: " << sizes[0] << std::endl;
+	std::cout << "Size after 1st read: " << sizes[0] << " bytes" << std::endl;
 
 	// delete many small ranges
 	Slice startDelete;
@@ -194,7 +199,7 @@ int main() {
 	// get the size info
 	statusDB = db->GetApproximateSizes(SAoptions, db->DefaultColumnFamily(), ranges.data(), 1, sizes.data());
 	assert(statusDB.ok());  // make sure to check error
-	std::cout << "Size after deletes: " << sizes[0] << std::endl;
+	std::cout << "Size after deletes: " << sizes[0] << " bytes" << std::endl;
 	
 	// perform some warm-up point queries here
 	printf("Warn-up queries after deletes started.\n");
@@ -242,15 +247,18 @@ int main() {
 	printf("Average read throughput after deletes: %.6f entries/s\n", numPointQueries/pointReadTotalTimeAfter);
 	printf("Read throughput (valid) after deletes: %.6f entries/s\n", countPointValidAfter/validPointReadTotalTime);
 	printf("Read throughput (invalid) after deletes: %.6f entries/s\n", countPointInvalidAfter/invalidPointReadTotalTime);
-	/*
+	
+	perfContext = *(rocksdb::get_perf_context());
+	ioContext = *(rocksdb::get_iostats_context());
+	rocksdb::SetPerfLevel(rocksdb::PerfLevel::kDisable);
 	std::cout << "=======================================" << std::endl;
-	std::cout << perfContext.internal_delete_skipped_count << std::endl;
+	std::cout << perfContext.ToString() << std::endl;
 	std::cout << "=======================================" << std::endl;
-	std::cout << ioContext.cpu_read_nanos << std::endl;
-	*/
+	std::cout << ioContext.ToString() << std::endl;
+
 	statusDB = db->GetApproximateSizes(SAoptions, db->DefaultColumnFamily(), ranges.data(), 1, sizes.data());
 	assert(statusDB.ok());  // make sure to check error
-	std::cout << "Size after 2nd read: " << sizes[0] << std::endl;
+	std::cout << "Size after 2nd read: " << sizes[0] << " bytes" << std::endl;
 	
 	// delete the database and end the test
 	delete db;
