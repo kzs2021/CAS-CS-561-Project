@@ -126,7 +126,7 @@ int main() {
 	int valueLen = 1012;  // the length of the values
 	int keyLen = 12;  // the length of each key
 	// workload & query basic config
-	int rangeSize = 100000;  // the number of key-value pairs to generate
+	int rangeSize = 1000000;  // the number of key-value pairs to generate
 	int numPointQueries = rangeSize/10;  // number of point queries to perform
 	// the start & end of range queries
 	std::string rangeQueryStart = fixDigit(keyLen, std::to_string(rangeSize/4));
